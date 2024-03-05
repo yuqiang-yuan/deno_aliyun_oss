@@ -1,0 +1,27 @@
+{
+    "name": "@yuanyq/aliyun_oss",
+    "version": "v0.1.0",
+    "exports": {
+        ".": "./mod.ts",
+        "./oss_client.ts": "./oss_client.ts"
+    },
+    "imports": {
+        "std/": "https://deno.land/std@0.218.2/",
+        "hmac/": "https://deno.land/x/hmac@v2.0.1/",
+        "xml/": "https://deno.land/x/xml@2.1.3/"
+    },
+    "tasks": {
+        "dev": "deno run --watch main.ts",
+        "doc": "deno doc --html --name=\"Aliyun OSS SDK\" ./*.ts",
+        "test": "deno test --trace-leaks -A",
+        "test-bucket": "deno test --trace-leaks -A --filter \"/bucket*/\""
+    },
+    "test": {
+        "include": ["oss_client_test.ts"]
+    },
+    "fmt": {
+        "exclude": [
+            "README.md"
+        ]
+    }
+}

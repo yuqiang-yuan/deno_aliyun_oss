@@ -1,0 +1,7 @@
+docs/
+free_test.ts
+testenv.sh
+.env
+oss_client_test.ts
+*.sublime-workspace
+.DS_Store
