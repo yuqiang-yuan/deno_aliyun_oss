@@ -6,8 +6,8 @@
 
 import { ClientConfig } from "./common.ts";
 
-import { Bucket, BucketOperation, ListBucketsOptions, ListBucketsQuery, BucketInfo } from "./bucket.ts";
-
+import { Bucket, BucketOperation, ListBucketsOptions, ListBucketsQuery, BucketInfo, ListObjectsQuery, ListObjectsResult } from "./bucket.ts";
+import { ObjectOperation, PutObjectOptions, PutObjectResult } from "./object.ts";
 /**
  * Options for oss client
  */
@@ -42,6 +42,7 @@ export class OssClient {
     };
 
     #bucketOperations: BucketOperation;
+    #objectOperations: ObjectOperation;
 
 
     /**
@@ -74,6 +75,7 @@ export class OssClient {
         };
         
         this.#bucketOperations = new BucketOperation(clientConfig);
+        this.#objectOperations = new ObjectOperation(clientConfig);
     }
 
     #getClientConfig(): ClientConfig {
@@ -102,5 +104,21 @@ export class OssClient {
 
     getBucketInfo(bucketName: string): Promise<BucketInfo> {
         return this.#bucketOperations.getBucketInfo(bucketName);
+    }
+
+    listObjects(bucketName: string, query?: ListObjectsQuery): Promise<ListObjectsResult> {
+        return this.#bucketOperations.listObjects(bucketName, query);
+    }
+
+    createFolder(bucketName: string, folderPath: string): Promise<void> {
+        return this.#objectOperations.createFolder(bucketName, folderPath);
+    }
+
+    // putFile(bucketName: string, objectKey: string, file: Deno.FsFile, options?: PutObjectOptions): Promise<PutObjectResult> {
+    //     return this.#objectOperations.putFile(bucketName, objectKey, file, options);
+    // }
+
+    putFile(bucketName: string, objectKey: string, filePath: string, options?: PutObjectOptions): Promise<PutObjectResult> {
+        return this.#objectOperations.putFile(bucketName, objectKey, filePath, options);
     }
 };

@@ -2,6 +2,7 @@ import { parse as parseXml } from "xml/mod.ts";
 
 import { ClientConfig, CommonOptions, RequestConfig } from "./common.ts";
 import { Operation } from "./operation.ts";
+import { camelToKebab } from "./helper.ts";
 
 /**
  * List buckets query parameters.
@@ -70,6 +71,42 @@ export interface BucketInfo extends Bucket {
     }
 };
 
+/**
+ * List object query parameters
+ * See [Official Document](https://help.aliyun.com/zh/oss/developer-reference/listobjectsv2?spm=a2c4g.11186623.0.0.2e09d37eaJFStJ) for more details.
+ */
+export interface ListObjectsQuery {
+    delimiter?: string;
+    startAfter?: string;
+    continuationToken?: string;
+    maxKeys?: number;
+    prefix?: string;
+    encodingType?: string;
+    fetchOwner?: boolean;
+};
+
+export interface ListObjectsContent {
+    key: string;
+    lastModified: Date;
+    eTag: string;
+    type: string;
+    size: number;
+    storageClass: string;
+    restoreInfo?: string;
+};
+
+export interface ListObjectsResult {
+    name: string;
+    prefix?: string;
+    maxKeys?: number;
+    delimiter?: string;
+    isTruncated?: boolean;
+    nextContinuationToken?: string;
+    keyCount?: number;
+    commonPrefixes?: string[],
+    contents?: ListObjectsContent[]
+}
+
 export class BucketOperation extends Operation {
     constructor(clientConfig: ClientConfig) {
         super(clientConfig);
@@ -111,8 +148,8 @@ export class BucketOperation extends Operation {
             }
         };
 
-        const responseContent = await super.doRequest(this.clientConfig, requestConfig);
-        return this.#parseListBucketsResponseContent(responseContent);
+        const { content } = await super.doRequest(this.clientConfig, requestConfig);
+        return this.#parseListBucketsResponseContent(content!);
     }
 
     /**
@@ -244,9 +281,10 @@ export class BucketOperation extends Operation {
      * @param {string} bucketName [description]
      */
     async getBucketInfo(bucketName: string): Promise<BucketInfo> {
-        const query: Record<string, string> = {};
-        query["bucketInfo"] = "";
-
+        const query: Record<string, string | null> = {
+            bucketInfo: null
+        };
+        
         const requestConfig: RequestConfig = {
             method: "GET",
             bucketName: bucketName,
@@ -310,6 +348,78 @@ export class BucketOperation extends Operation {
         };
 
         return bucketInfo;
+    }
+
+    /**
+     * List objects
+     */
+    async listObjects(bucketName: string, query?: ListObjectsQuery): Promise<ListObjectsResult> {
+        const params: Record<string, string | number | boolean> = {
+            "list-type": 2,
+        };
+
+        if (query) {
+            Object.entries(query).forEach(([k, v]) => params[camelToKebab(k)] = v);
+        }
+
+        const requestConfig: RequestConfig = {
+            method: "GET",
+            bucketName,
+            query: params
+        };
+
+        const { content } = await super.doRequest(this.clientConfig, requestConfig);
+        const doc = parseXml(content!);
+        //@ts-ignore xml parser
+        const resultNode = doc.ListBucketResult;
+        
+        //@ts-ignore xml parser
+        const { Name: name, Prefix: prefix, MaxKeys: maxKeys, Delimiter: delimiter, IsTruncated: isTruncated, NextContinuationToken: nextContinuationToken, KeyCount: keyCount } = resultNode;
+        
+        //@ts-ignore xml parser
+        const commonPrefixes: string[] = [];
+
+        //@ts-ignore xml parser
+        if (resultNode.CommonPrefixes) {
+            //@ts-ignore xml parser
+            const commonPrefixeNodes = Array.isArray(resultNode.CommonPrefixes) ? resultNode.CommonPrefixes : [resultNode.CommonPrefixes];
+
+            //@ts-ignore xml parser
+            commonPrefixeNodes.forEach(n => commonPrefixes.push(n.Prefix));
+        }
+        
+        const contents: ListObjectsContent[] = [];
+
+        //@ts-ignore xml parser
+        if (resultNode.Contents) {
+            //@ts-ignore xml parser
+            const contentsNodes = Array.isArray(resultNode.Contents) ? resultNode.Contents : [resultNode.Contents];
+            //@ts-ignore xml parser
+            contentsNodes.forEach(n => {
+                //@ts-ignore xml parser
+                contents.push({
+                    key: n.Key,
+                    lastModified: new Date(n.LastModified),
+                    eTag: n.ETag,
+                    type: n.Type,
+                    size: n.Size,
+                    storageClass: n.StorageClass,
+                    restoreInfo: n.RestoreInfo
+                });
+            });
+        }
+
+        return {
+            name,
+            prefix, 
+            maxKeys,
+            delimiter,
+            isTruncated,
+            nextContinuationToken,
+            keyCount,
+            commonPrefixes,
+            contents
+        };
     }
 }
 

@@ -1,10 +1,10 @@
 import { crypto } from "std/crypto/mod.ts";
 import { encodeHex } from "std/encoding/hex.ts";
 
-import { parse as parseXml } from "xml/mod.ts";
+
 import { hmac } from "hmac/mod.ts";
 
-import { ClientConfig, RequestConfig, ClientError } from "./common.ts";
+import { ClientConfig, RequestConfig, ClientError, ResponseResult } from "./common.ts";
 import { ossDateString, log } from "./helper.ts";
 
 
@@ -51,7 +51,7 @@ export class Operation {
     /**
      * Build the uri to send request
      * @param  {string} objectKey  
-     * @return {string}            
+     * @return {string}
      */
     #buildRequestUri(objectKey?: string): string {
         if (objectKey) {
@@ -62,7 +62,7 @@ export class Operation {
         return "/";
     }
 
-    #buildCanonicalQueryString(query?: Record<string, string>): string {
+    #buildCanonicalQueryString(query?: Record<string, string | number | boolean | null | undefined>): string {
         if (!query) {
             return "";
         }
@@ -70,7 +70,7 @@ export class Operation {
         const joinedString = Object.entries(query)
             .sort((e1, e2) => e1[0].localeCompare(e2[0]))
             .map(([k, v]) => {
-                const s = v === null || v === undefined || v.trim().length === 0
+                const s = v === null || v === undefined || `${v}`.trim().length === 0
                           ? ""
                           : `=${encodeURIComponent(v)}`;
                 return `${k}${s}`; 
@@ -94,11 +94,11 @@ export class Operation {
         return `${joinedString}\n`;
     }
 
-    protected async doRequest(clientConfig: ClientConfig, requestConfig: RequestConfig): Promise<string> {
+    protected async doRequest(clientConfig: ClientConfig, requestConfig: RequestConfig): Promise<ResponseResult> {
         const SIG_VERSION = "OSS4-HMAC-SHA256";
 
         const { region, endpoint, accessKeyId, accessKeySecret, secure, cname, timeoutMs } = clientConfig;
-        const { method, bucketName, objectKey, headers, query, options } = requestConfig;
+        const { method, bucketName, objectKey, headers, query, body, options } = requestConfig;
 
         const domainName = `${bucketName ? bucketName : ""}${bucketName ? "." : ""}${endpoint}`;
 
@@ -112,6 +112,13 @@ export class Operation {
             "x-oss-content-sha256": "UNSIGNED-PAYLOAD",
             "x-oss-date": dateTimeString,
         }, headers);
+        
+        
+        if (method === 'PUT') {
+            if (!body) {
+                allHeaders["content-length"] = "0";
+            }
+        }
 
         const headersToSign: Record<string, string> = {};
 
@@ -181,6 +188,10 @@ export class Operation {
             keepalive: false,
         };
 
+        if (body) {
+            requestInit.body = body;
+        }
+
         try {
             const response = await fetch(fullUrl, requestInit);
             log(`< resopnse status code: ${response.status}`);
@@ -195,36 +206,23 @@ export class Operation {
             log("---- end of response content ----\n");
 
             if (400 <= status && status < 500) {
-                throw this.#parseErrorResponse(content);
+                throw ClientError.fromResponseContent(content);
             }
 
-            return content;
+            const responseHeaders: Record<string, string> = {};
+            response.headers.forEach((v, k) => {
+                log(`< headers: ${k}: ${v}`);
+                responseHeaders[k] = v;
+            });
+            return {
+                headers: responseHeaders,
+                content,
+            };
         } catch (e) {
             console.error(e);
             throw e;
         }
     }
 
-    #parseErrorResponse(responseContent: string): ClientError {
-        const doc = parseXml(responseContent);
-        //@ts-ignore xml parser
-        const errorNode = doc.Error;
-        if (! errorNode) {
-            return new ClientError("unknown error");
-        }
-
-        //@ts-ignore xml parser
-        const { Code: code, Message: message, RequestId: requestId, HostId: hostId, BucketName: bucketName, EC: ec, RecommendDoc: recommendDoc } = errorNode;
-
-        return new ClientError(
-            message,
-            code,
-            bucketName,
-            requestId,
-            hostId,
-            ec,
-            recommendDoc
-        );
-    }
 }
 

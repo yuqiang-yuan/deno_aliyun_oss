@@ -1,3 +1,5 @@
+import { parse as parseXml } from "xml/mod.ts";
+
 /**
  * Common options for aliyun oss operations
  */
@@ -65,8 +67,26 @@ export class ClientError extends Error {
         this.#ec = ec;
     }
 
-    static fromResponseContent(xmlContent: string): ClientError {
-        return new ClientError("unknonwn");
+    static fromResponseContent(responseContent: string): ClientError {
+        const doc = parseXml(responseContent);
+        //@ts-ignore xml parser
+        const errorNode = doc.Error;
+        if (! errorNode) {
+            return new ClientError("unknown error");
+        }
+
+        //@ts-ignore xml parser
+        const { Code: code, Message: message, RequestId: requestId, HostId: hostId, BucketName: bucketName, EC: ec, RecommendDoc: recommendDoc } = errorNode;
+
+        return new ClientError(
+            message,
+            code,
+            bucketName,
+            requestId,
+            hostId,
+            ec,
+            recommendDoc
+        );
     }
 
     toJSON() {
@@ -116,11 +136,16 @@ export interface RequestConfig {
     bucketName?: string;
     objectKey?: string;
     headers?: Record<string, string>;
-    query?: Record<string, string>;
-
+    query?: Record<string, string | number | boolean | null | undefined>;
+    body?: ReadableStream;
     //deno-lint-ignore no-explicit-any
     options?: Record<string, any>
 };
+
+export interface ResponseResult {
+    headers: Record<string, string>;
+    content?: string;
+}
 
 /**
  * OSS owner info

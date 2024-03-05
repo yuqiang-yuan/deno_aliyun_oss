@@ -46,3 +46,23 @@ export function mergeUint8Arrays(...arrays: Uint8Array[]): Uint8Array {
 
     return merged;
 }
+
+
+/**
+ * Convert property name from camel case to kebab case
+ * @param k The camel case
+ * @returns snake case property name. e.g. `startAfter` will be converted to `start-after`
+ */
+export function camelToKebab(k: string): string {
+    return k.replace(/[A-Z]/g, (p1) => {
+        return `-${p1.toLowerCase()}`;
+    });
+}
+
+export function isBlank(s: string | undefined | null): boolean {
+    if (s === null || s === undefined) {
+        return true;
+    }
+
+    return s.trim().length === 0;
+}
