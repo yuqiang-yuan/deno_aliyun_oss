@@ -13,6 +13,7 @@
     "tasks": {
         "dev": "deno run --watch main.ts",
         "doc": "deno doc --html --name=\"Aliyun OSS SDK\" ./*.ts",
+        "lint": "deno lint common.ts helper.ts bucket.ts object.ts operation.ts oss_client.ts",
         "test": "deno test --trace-leaks -A",
         "test-bucket": "deno test --trace-leaks -A --filter \"/bucket*/\""
     },

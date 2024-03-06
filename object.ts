@@ -7,13 +7,13 @@ import { parse as parseXml } from "xml/mod.ts";
 
 import { ClientConfig, CommonOptions, RequestConfig, ClientError } from "./common.ts";
 import { Operation } from "./operation.ts";
-import { camelToKebab, isBlank } from "./helper.ts";
+import { isBlank } from "./helper.ts";
 
 
 /**
  * Put object request
  */
-export interface PutObjectOptions {
+export interface PutObjectOptions extends CommonOptions {
     cacheControl?: string;
     contentDisposition?: string;
     contentEncoding?: string;
@@ -77,7 +77,7 @@ export class ObjectOperation extends Operation {
             objectKey,
         };
 
-        await super.doRequest(this.clientConfig, requestConfig);
+        await super.doRequest(requestConfig);
     }
 
     /**
@@ -163,7 +163,7 @@ export class ObjectOperation extends Operation {
             body: stream,
         };
 
-        const { headers: responseHeaders } = await super.doRequest(this.clientConfig, requestConfig);
+        const { headers: responseHeaders } = await super.doRequest(requestConfig);
         return {
             contentMd5: responseHeaders["content-md5"],
             versionId: responseHeaders["x-oss-version-id"]
@@ -178,7 +178,7 @@ export class ObjectOperation extends Operation {
             throw new ClientError("filePath must NOT be emtpy");
         }
 
-        let file: Deno.FsFile | null = null;
+        let file: Deno.FsFile | undefined = undefined;
 
         try {
             file = await Deno.open(filePath);
@@ -217,8 +217,8 @@ export class ObjectOperation extends Operation {
         } finally {
             if (file !== null) {
                 try {
-                    (file as Deno.FsFile).close();
-                } catch (e) {
+                    file?.close();
+                } catch (_e) {
                     // ignore BadResource: Bad resource ID when the stream has been read
                 }
             }

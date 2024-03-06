@@ -75,7 +75,7 @@ export interface BucketInfo extends Bucket {
  * List object query parameters
  * See [Official Document](https://help.aliyun.com/zh/oss/developer-reference/listobjectsv2?spm=a2c4g.11186623.0.0.2e09d37eaJFStJ) for more details.
  */
-export interface ListObjectsQuery {
+export interface ListObjectsQuery extends CommonOptions {
     delimiter?: string;
     startAfter?: string;
     continuationToken?: string;
@@ -148,7 +148,7 @@ export class BucketOperation extends Operation {
             }
         };
 
-        const { content } = await super.doRequest(this.clientConfig, requestConfig);
+        const { content } = await super.doRequest(requestConfig);
         return this.#parseListBucketsResponseContent(content!);
     }
 
@@ -291,7 +291,7 @@ export class BucketOperation extends Operation {
             query: query,
         };
 
-        const responseContent = await super.doRequest(this.clientConfig, requestConfig);
+        const responseContent = await super.doRequest(requestConfig);
         //@ts-ignore xml parser
         const bucketNode = parseXml(responseContent).BucketInfo.Bucket;
 
@@ -368,7 +368,7 @@ export class BucketOperation extends Operation {
             query: params
         };
 
-        const { content } = await super.doRequest(this.clientConfig, requestConfig);
+        const { content } = await super.doRequest(requestConfig);
         const doc = parseXml(content!);
         //@ts-ignore xml parser
         const resultNode = doc.ListBucketResult;

@@ -94,10 +94,10 @@ export class Operation {
         return `${joinedString}\n`;
     }
 
-    protected async doRequest(clientConfig: ClientConfig, requestConfig: RequestConfig): Promise<ResponseResult> {
+    protected async doRequest(requestConfig: RequestConfig): Promise<ResponseResult> {
         const SIG_VERSION = "OSS4-HMAC-SHA256";
 
-        const { region, endpoint, accessKeyId, accessKeySecret, secure, cname, timeoutMs } = clientConfig;
+        const { region, endpoint, accessKeyId, accessKeySecret, secure, cname, timeoutMs } = this.#clientConfig;
         const { method, bucketName, objectKey, headers, query, body, options } = requestConfig;
 
         const domainName = `${bucketName ? bucketName : ""}${bucketName ? "." : ""}${endpoint}`;
@@ -170,17 +170,16 @@ export class Operation {
 
         const authorization = `${SIG_VERSION} Credential=${accessKeyId}/${scope},AdditionalHeaders=${additionalHeaders},Signature=${signature}`;
         allHeaders["Authorization"] = authorization;
-
-        log("\n---- begin of all headers ----");
-        Object.entries(allHeaders).forEach(([k, v]) => log(`${k}: ${v}`));
-        log("---- end of all headers ----\n");
-
+        
         let fullUrl = `${secure ? "https://" : "http://"}${domainName}${requestUri}`;
         if (canonicalQuery) {
             fullUrl = `${fullUrl}?${canonicalQuery}`;
         }
         
-        log(`> ${method} ${fullUrl}`);
+        log(`> ${method} ${fullUrl}\n`);
+        Object.entries(allHeaders).forEach(([k, v]) => log(`> headers: ${k}: ${v}`));
+
+        log("-----------------------------------------------------------------------");
 
         const requestInit:RequestInit = {
             method: method,
