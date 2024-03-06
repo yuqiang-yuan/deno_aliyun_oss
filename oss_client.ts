@@ -6,8 +6,8 @@
 
 import { ClientConfig } from "./common.ts";
 
-import { Bucket, BucketOperation, ListBucketsOptions, ListBucketsQuery, BucketInfo, ListObjectsQuery, ListObjectsResult } from "./bucket.ts";
-import { ObjectOperation, PutObjectOptions, PutObjectResult } from "./object.ts";
+import { Bucket, BucketOperation, ListBucketsOptions, BucketInfo, ListObjectsQuery, ListObjectsResult } from "./bucket.ts";
+import { ObjectOperation, PutObjectOptions, PutObjectResult, HeadObjectOptions } from "./object.ts";
 /**
  * Options for oss client
  */
@@ -93,13 +93,13 @@ export class OssClient {
     /**
      * List buckets
      */
-    listBuckets(query?: ListBucketsQuery, options?: ListBucketsOptions): Promise<Bucket[]> {
-        return this.#bucketOperations.listBuckets(query, options);
+    listBuckets(options?: ListBucketsOptions): Promise<Bucket[]> {
+        return this.#bucketOperations.listBuckets(options);
     }
     
     /* List all buckets. If there are so many buckets, the client will request multiple times to get complete bucket list */
-    listAllBuckets(options?: ListBucketsOptions): Promise<Bucket[]> {
-        return this.#bucketOperations.listAllBuckets(options);
+    listAllBuckets(): Promise<Bucket[]> {
+        return this.#bucketOperations.listAllBuckets();
     }
 
     getBucketInfo(bucketName: string): Promise<BucketInfo> {
@@ -118,7 +118,11 @@ export class OssClient {
     //     return this.#objectOperations.putFile(bucketName, objectKey, file, options);
     // }
 
-    putFile(bucketName: string, objectKey: string, filePath: string, options?: PutObjectOptions): Promise<PutObjectResult> {
-        return this.#objectOperations.putFile(bucketName, objectKey, filePath, options);
+    putObject(bucketName: string, objectKey: string, filePath: string, options?: PutObjectOptions): Promise<PutObjectResult> {
+        return this.#objectOperations.putObject(bucketName, objectKey, filePath, options);
+    }
+
+    headObject(bucketName: string, objectKey: string, options?: HeadObjectOptions): Promise<Record<string, string>> {
+        return this.#objectOperations.headObject(bucketName, objectKey, options);
     }
 };

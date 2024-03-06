@@ -17,9 +17,6 @@
         "test": "deno test --trace-leaks -A",
         "test-bucket": "deno test --trace-leaks -A --filter \"/bucket*/\""
     },
-    "test": {
-        "include": ["oss_client_test.ts"]
-    },
     "fmt": {
         "exclude": [
             "README.md"

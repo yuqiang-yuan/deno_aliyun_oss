@@ -2,17 +2,31 @@ import { parse as parseXml } from "xml/mod.ts";
 
 import { ClientConfig, CommonOptions, RequestConfig } from "./common.ts";
 import { Operation } from "./operation.ts";
-import { camelToKebab } from "./helper.ts";
+import { camelToKebab, isBlank } from "./helper.ts";
 
 /**
  * List buckets query parameters.
  * See [Official Documents](https://help.aliyun.com/zh/oss/developer-reference/listbuckets?spm=a2c4g.11186623.0.0.1b0ab930SHOdG9) for more details.
  */
-export interface ListBucketsQuery {
+export interface ListBucketsOptions {
+    /**
+     * 限定返回的 Bucket 名称必须以 `prefix` 作为前缀。如果不设定，则不过滤前缀信息。
+     */
     prefix?: string;
+
+    /**
+     * 设定结果从 `marker` 之后按字母排序的第一个开始返回。如果不设定，则从头开始返回数据。
+     */
     marker?: string;
+
+    /**
+     * 限定此次返回 Bucket 的最大个数。取值范围：`1~1000`。默认值：`100`
+     */
     maxKeys?: number;
 
+    /**
+     * 返回属于该资源组的所有 Bucket
+     */
     resourceGroupId?: string;
 };
 
@@ -44,7 +58,6 @@ export interface ListBucketsResult {
     buckets: Bucket[];
 }
 
-export type ListBucketsOptions = CommonOptions;
 
 /**
  * Bucket detail information
@@ -76,13 +89,44 @@ export interface BucketInfo extends Bucket {
  * See [Official Document](https://help.aliyun.com/zh/oss/developer-reference/listobjectsv2?spm=a2c4g.11186623.0.0.2e09d37eaJFStJ) for more details.
  */
 export interface ListObjectsQuery extends CommonOptions {
+    /**
+     * 对 Object 名字进行分组的字符。所有 Object 名字包含指定的前缀，第一次出现 `delimiter` 字符之间的 Object 作为一组元素（即 CommonPrefixes）。
+     */
     delimiter?: string;
+
+    /**
+     * 设定从 `start-after` 之后按字母排序开始返回 Object。
+     * `start-after 用来实现分页显示效果，参数的长度必须小于 `1024 字节。
+     * 做条件查询时，即使 `start-after` 在列表中不存在，也会从符合 `start-after` 字母排序的下一个开始打印。
+     */
     startAfter?: string;
+
+    /**
+     * 指定从此 Token 开始列出 Object。可以从上一次查询结果中的 `nextContinuationToken` 获取 Token。
+     */
     continuationToken?: string;
+
+    /**
+     * `0 - 1000` 的数字，表示本次查询返回的 Object 的最大数量。
+     */
     maxKeys?: number;
+
+    /**
+     * 限定返回文件的 Key 必须以 `prefix` 作为前缀。
+     * 如果把 `prefix` 设为某个文件夹名，则列举以此 `prefix` 开头的文件，即该文件夹下递归的所有文件和子文件夹。
+     * 在设置 `prefix` 的基础上，将 `delimiter` 设置为正斜线（`/`）时，
+     * 返回值就只列举该文件夹下的文件，文件夹下的子文件夹名返回在 `commonPrefixes` 中，
+     * 子文件夹下递归的所有文件和文件夹不显示。
+     * 
+     * 例如，一个 Bucket 中有三个 Object，分别为 `fun/test.jpg`、`fun/movie/001.avi` 和 `fun/movie/007.avi`。
+     * 
+     * 如果设定 `prefix` 为 `fun/`，则返回三个 Object；
+     * 
+     * 如果在 `prefix` 设置为 `fun/` 的基础上，将 `delimiter` 设置为正斜线（`/`），
+     * 则返回 `fun/test.jpg` 和 `fun/movie/`。
+     * @type {[type]}
+     */
     prefix?: string;
-    encodingType?: string;
-    fetchOwner?: boolean;
 };
 
 export interface ListObjectsContent {
@@ -107,6 +151,7 @@ export interface ListObjectsResult {
     contents?: ListObjectsContent[]
 }
 
+
 export class BucketOperation extends Operation {
     constructor(clientConfig: ClientConfig) {
         super(clientConfig);
@@ -116,8 +161,8 @@ export class BucketOperation extends Operation {
      * List buckets which satisfied query.
      * See [Official Documents](https://help.aliyun.com/zh/oss/developer-reference/listbuckets?spm=a2c4g.11186623.0.0.1b0ab930SHOdG9) for more details.
      */
-    async #listBuckets(query?: ListBucketsQuery, options?: ListBucketsOptions): Promise<ListBucketsResult> {
-        const { prefix, marker, maxKeys, resourceGroupId } = Object.assign({}, query);
+    async #listBuckets(options?: ListBucketsOptions): Promise<ListBucketsResult> {
+        const { prefix, marker, maxKeys, resourceGroupId } = Object.assign({}, options);
 
         const requestQuery: Record<string, string> = {};
         if (prefix) {
@@ -137,15 +182,10 @@ export class BucketOperation extends Operation {
             requestHeaders["x-oss-resource-group-id"] = resourceGroupId;
         }
 
-        const { timeoutMs } = Object.assign({}, options);
-
         const requestConfig: RequestConfig = {
             method: "GET",
             query: requestQuery,
             headers: requestHeaders,
-            options: {
-                timeoutMs
-            }
         };
 
         const { content } = await super.doRequest(requestConfig);
@@ -154,31 +194,29 @@ export class BucketOperation extends Operation {
 
     /**
      * List buckets with query parameters
-     * @param  {ListBucketsQuery}  query 
      * @return {Promise<Bucket[]>}       
      */
-    async listBuckets(query?: ListBucketsQuery, options?: ListBucketsOptions): Promise<Bucket[]> {
-        const result = await this.#listBuckets(query, options);
+    async listBuckets(options?: ListBucketsOptions): Promise<Bucket[]> {
+        const result = await this.#listBuckets(options);
         return result.buckets;
     }
 
     /**
      * list all buckets
-     * @param  {ListBucketsOptions} options 
      * @return {Promise<Bucket[]>}          
      */
-    async listAllBuckets(options?: ListBucketsOptions): Promise<Bucket[]> {
+    async listAllBuckets(): Promise<Bucket[]> {
         const allBuckets: Bucket[] = [];
         let marker: string | null = null;
 
         while (true) {
-            const q: ListBucketsQuery = {};
+            const q: ListBucketsOptions = {};
 
             if (marker) {
                 q.marker = marker;
             }
 
-            const result = await this.#listBuckets(q, options);
+            const result = await this.#listBuckets(q);
             result.buckets.forEach(b => allBuckets.push(b));
 
             if (result.isTruncated && result.nextMarker) {
@@ -421,5 +459,7 @@ export class BucketOperation extends Operation {
             contents
         };
     }
+
+
 }
 

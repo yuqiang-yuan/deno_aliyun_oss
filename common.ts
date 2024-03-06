@@ -56,8 +56,12 @@ export class ClientError extends Error {
     #ec?: string;
     #recommendDoc?: string;
     #bucketName?: string;
+    /**
+     * http status code
+     */
+    #status?: number;
 
-    constructor(message?: string, code?: string, bucketName?: string, requestId?: string, hostId?: string, ec?: string, recommendDoc?: string) {
+    constructor(message?: string, code?: string, bucketName?: string, requestId?: string, hostId?: string, ec?: string, recommendDoc?: string, status?: number) {
         super(message);
         this.#code = code;
         this.#bucketName = bucketName;
@@ -65,6 +69,7 @@ export class ClientError extends Error {
         this.#hostId = hostId;
         this.#recommendDoc = recommendDoc;
         this.#ec = ec;
+        this.#status = status;
     }
 
     static fromResponseContent(responseContent: string): ClientError {
@@ -97,7 +102,8 @@ export class ClientError extends Error {
             requestId: this.#requestId,
             hostId: this.#hostId,
             ec: this.#ec,
-            recommendDoc: this.#recommendDoc
+            recommendDoc: this.#recommendDoc,
+            status: this.#status
         };
     }
 
@@ -124,6 +130,14 @@ export class ClientError extends Error {
     get recommendDoc() {
         return this.#recommendDoc;
     }
+
+    get status() {
+        return this.#status;
+    }
+
+    set status(val: number | undefined) {
+        this.#status = val;
+    }
 }
 
 
@@ -143,7 +157,15 @@ export interface RequestConfig {
 };
 
 export interface ResponseResult {
+
+    /**
+     * 响应头
+     */
     headers: Record<string, string>;
+
+    /**
+     * 响应内容
+     */
     content?: string;
 }
 

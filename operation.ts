@@ -113,7 +113,6 @@ export class Operation {
             "x-oss-date": dateTimeString,
         }, headers);
         
-        
         if (method === 'PUT') {
             if (!body) {
                 allHeaders["content-length"] = "0";
@@ -204,8 +203,12 @@ export class Operation {
             log(content);
             log("---- end of response content ----\n");
 
-            if (400 <= status && status < 500) {
-                throw ClientError.fromResponseContent(content);
+            if (300 <= status && status < 500) {
+                if (content) {
+                    throw ClientError.fromResponseContent(content);
+                } else {
+                    throw new ClientError(`Status code is not OK ${status}`, undefined, undefined, undefined, undefined, undefined, undefined, status);
+                }
             }
 
             const responseHeaders: Record<string, string> = {};
@@ -213,6 +216,7 @@ export class Operation {
                 log(`< headers: ${k}: ${v}`);
                 responseHeaders[k] = v;
             });
+            
             return {
                 headers: responseHeaders,
                 content,
