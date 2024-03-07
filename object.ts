@@ -5,10 +5,9 @@ import { extname } from "std/path/mod.ts";
 
 import { parse as parseXml } from "xml/mod.ts";
 
-import { ClientConfig, CommonOptions, RequestConfig, ClientError } from "./common.ts";
+import { ClientConfig, CommonOptions, RequestConfig, ClientError, HttpMethod } from "./common.ts";
 import { Operation } from "./operation.ts";
-import { isBlank } from "./helper.ts";
-import { camelToKebab } from "./helper.ts";
+import { isBlank, log, camelToKebab } from "./helper.ts";
 
 
 /**
@@ -174,6 +173,81 @@ export interface HeadObjectOptions {
      * 如果传入期望的 ETag 值和 Object 的 ETag 不匹配，则返回 200 OK 和 Object Meta；否则抛出 ClientError, status = 304 Not Modified。
      */
     ifNoneMatch?: string;
+}
+
+export interface GetObjectOptions {
+    responseContentType?: string;
+    responseContentLanguage?: string;
+    responseExpires?: string;
+    responseCacheControl?: string;
+    responseContentDisposition?: string;
+    responseContentEncoding?: string;
+
+    /**
+     * 如果传入参数中的时间早于实际修改时间，则返回 200 OK 和 Object Meta；否则抛出 ClientError, status = 304 Not Modified。
+     */
+    ifModifiedSince?: string;
+
+    /**
+     * 如果传入参数中的时间等于或者晚于文件实际修改时间，则返回 200 OK 和 Object Meta；否则抛出 ClientError, status = 412 Precondition Failed。
+     */
+    ifUnmodifiedSince?: string;
+
+    /**
+     * 如果传入期望的 ETag 和 Object 的 ETag 匹配，则返回 200 OK 和 Object Meta；否则抛出 ClientError, status = 412 precondition failed。
+     */
+    ifMatch?: string;
+
+    /**
+     * 如果传入期望的 ETag 值和 Object 的 ETag 不匹配，则返回 200 OK 和 Object Meta；否则抛出 ClientError, status = 304 Not Modified。
+     */
+    ifNoneMatch?: string;
+
+    /**
+     * 是否对响应内容进行 gzip 压缩。
+     * 如果采用了Gzip压缩，则不会附带ETag信息。
+     * 目前 OSS 支持 Gzip 压缩的 Content-Type 为 
+     * `text/cache-manifest`、 `text/xml`、`text/plain`、`text/css`、
+     * `application/javascript`、`application/x-javascript`、`application/rss+xml`、`application/json和text/json`。
+     */
+    // gzipResponse?: boolean;
+}
+
+export interface DeleteObjectOptions {
+    /**
+     * 删除指定 `versionId` 的 Object。
+     * 如果要删除 ID 为 `null` 的版本，请将此参数设置为字符串 `"null"`。
+     */
+    versionId?: string;
+}
+
+export interface SignatureOptions {
+    /**
+     * 有效期多少秒
+     */
+    ttlSeconds: number;
+
+    /**
+     * 如果是生成上传 URL，这里指要上传的内容的 Content-Type
+     */
+    contentType?: string;
+
+    /**
+     * 图片处理。例如：`image/resize,w_200`
+     */
+    process?: string;
+
+    responseContentType?: string;
+    responseContentLanguage?: string;
+    responseCacheControl?: string;
+    responseExpires?: string;
+    responseContentDisposition?: string;
+    responseContentEncoding?: string;
+
+    /**
+     * 其他需要包含在签名 URL 中的参数
+     */
+    additionalParameters?: Record<string, string>;
 }
 
 /**
@@ -388,4 +462,126 @@ export class ObjectOperation extends Operation {
         const { headers: responseHeaders } = await super.doRequest(requestConfig);
         return responseHeaders;
     }
+
+    /**
+     * 下载 Object 存储到本地文件。
+     * `localFilepath` 需是一个具有写入权限的文件全路径，例如：`/foo/bar/test.png`。
+     * 
+     */
+    async getObject(bucketName: string, objectKey: string, localFilepath: string, options?: GetObjectOptions): Promise<void> {
+        if (isBlank(bucketName) || isBlank(objectKey)) {
+            throw new ClientError("bucketName and objectKey are required, can not be empty");
+        }
+
+        const headers: Record<string, string> = {};
+        Object.entries(Object.assign({}, options))
+            .forEach(([k, v]) => headers[camelToKebab(k)] = v);
+
+        // if (options?.gzipResponse) {
+        //     headers["accept-encoding"] = "gzip";
+        // }    
+
+        const requestConfig: RequestConfig = {
+            method: "GET",
+            bucketName,
+            objectKey,
+            headers,
+        };
+
+        const response = await super.sendRequest(requestConfig);
+
+        response.headers.forEach((v, k) => {
+            log(`< headers: ${k}: ${v}`);
+        });
+
+        const status = response.status;
+
+        if (status !== 200) {
+            const content = await response.text();
+            if (content) {
+                throw ClientError.fromResponseContent(content);
+            } else {
+                throw new ClientError(`Status code is not OK ${status}`, undefined, undefined, undefined, undefined, undefined, undefined, status);
+            }
+        }
+
+        if (response.body === null) {
+            throw new ClientError("null respnose body");
+        }
+
+        const file = await Deno.create(localFilepath);
+
+        log(`start downloading ${bucketName}, ${objectKey} to ${localFilepath}`);
+        await response.body.pipeTo(file.writable);
+
+        log(`${bucketName}, ${objectKey} to ${localFilepath} done`);
+    }
+
+    async deleteObject(bucketName: string, objectKey: string, options?: DeleteObjectOptions) {
+        if (isBlank(bucketName) || isBlank(objectKey)) {
+            throw new ClientError("bucketName and objectKey are required, can not be empty");
+        }
+
+        const query: Record<string, string> = {};
+        if (options?.versionId) {
+            query["versionId"] = options?.versionId;
+        }
+
+        const requestConfig: RequestConfig = {
+            method: "DELETE",
+            bucketName,
+            objectKey,
+            query
+        };
+
+        await super.doRequest(requestConfig);
+    }
+
+    /**
+     * 生成预签名的 URL。
+     * 大部分情况下，预签名的 URL 都是为了实现 `GET` 请求，所以在签名过程中，`host` 没有参与签名。
+     * 方便针对签名后的 URL 替换 hostname 为 CDN 地址、自定义域名等。
+     *
+     * 其他请求方式的预签名 URL 还没有测试，请谨慎使用。
+     */
+    signatureUrl(method: HttpMethod, bucketName: string, objectKey: string, options: SignatureOptions): Promise<string> {
+        if (isBlank(method) || isBlank(bucketName) || isBlank(objectKey)) {
+            throw new ClientError("method, bucketName and objectKey are required, can not be empty");
+        }
+
+        const headers: Record<string, string> = {};
+
+        if (options.contentType) {
+            headers["content-type"] = options.contentType;
+        }
+        
+        const query: Record<string, string> = {
+            "x-oss-expires": `${options.ttlSeconds}`
+        };
+
+        if (options.process) {
+            query["x-oss-process"] = options.process;
+        }
+
+        Object.entries(options).filter(([k, _]) => k.startsWith("response")).forEach(([k, v]) => query[camelToKebab(k)] = v);
+
+        if (options.additionalParameters) {
+            Object.entries(options.additionalParameters).forEach(([k, v]) => query[k] = v);
+        }
+
+        const requestConfig: RequestConfig = {
+            method,
+            bucketName,
+            objectKey,
+            headers,
+            query
+        };
+
+        return super.generatePresignedUrl(requestConfig);
+    }
 }
+
+
+
+
+

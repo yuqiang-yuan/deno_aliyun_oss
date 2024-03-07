@@ -4,10 +4,10 @@
  * 
  */
 
-import { ClientConfig } from "./common.ts";
+import { ClientConfig, HttpMethod } from "./common.ts";
 
 import { Bucket, BucketOperation, ListBucketsOptions, BucketInfo, ListObjectsQuery, ListObjectsResult } from "./bucket.ts";
-import { ObjectOperation, PutObjectOptions, PutObjectResult, HeadObjectOptions } from "./object.ts";
+import { ObjectOperation, PutObjectOptions, PutObjectResult, HeadObjectOptions, GetObjectOptions, DeleteObjectOptions, SignatureOptions } from "./object.ts";
 /**
  * Options for oss client
  */
@@ -125,4 +125,18 @@ export class OssClient {
     headObject(bucketName: string, objectKey: string, options?: HeadObjectOptions): Promise<Record<string, string>> {
         return this.#objectOperations.headObject(bucketName, objectKey, options);
     }
+
+    getObject(bucketName: string, objectKey: string, localFilepath: string, options?: GetObjectOptions): Promise<void> {
+        return this.#objectOperations.getObject(bucketName, objectKey, localFilepath, options);
+    }
+
+    deleteObject(bucketName: string, objectKey: string, options?: DeleteObjectOptions): Promise<void> {
+        return this.#objectOperations.deleteObject(bucketName, objectKey, options);
+    }
+
+    singatureUrl(method: HttpMethod, bucketName: string, objectKey: string, options: SignatureOptions): Promise<string> {
+        return this.#objectOperations.signatureUrl(method, bucketName, objectKey, options);
+    }
 };
+
+

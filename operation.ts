@@ -8,6 +8,7 @@ import { ClientConfig, RequestConfig, ClientError, ResponseResult } from "./comm
 import { ossDateString, log } from "./helper.ts";
 
 
+const SIG_VERSION = "OSS4-HMAC-SHA256";
 /**
  * OSS operation
  */
@@ -94,11 +95,85 @@ export class Operation {
         return `${joinedString}\n`;
     }
 
-    protected async doRequest(requestConfig: RequestConfig): Promise<ResponseResult> {
-        const SIG_VERSION = "OSS4-HMAC-SHA256";
+    protected async generatePresignedUrl(requestConfig: RequestConfig): Promise<string> {
+        const { region, endpoint, accessKeyId, accessKeySecret, secure } = this.#clientConfig;
+        const { method, bucketName, objectKey, headers, query } = requestConfig;
 
-        const { region, endpoint, accessKeyId, accessKeySecret, secure, cname, timeoutMs } = this.#clientConfig;
-        const { method, bucketName, objectKey, headers, query, body, options } = requestConfig;
+        const domainName = `${bucketName ? bucketName : ""}${bucketName ? "." : ""}${endpoint}`;
+
+        const d = new Date();
+        const dateTimeString = ossDateString(d);
+        const dateString = dateTimeString.substring(0, 8);
+        // const allHeaders: Record<string, string> = Object.assign({
+        //     "host": domainName,
+        // }, headers);
+
+        const headersToSign: Record<string, string> = {};
+
+        // Object.entries(allHeaders).filter(([k, _v]) => {
+        //     const s = k.toLowerCase();
+        //     return s === "host" || s.startsWith("x-oss-");
+        // }).forEach(([k, v]) => headersToSign[k] = v);
+
+        const fullQuery: Record<string, string | number | boolean | null | undefined> = Object.assign({}, query);
+        fullQuery["x-oss-signature-version"] = SIG_VERSION;
+        fullQuery["x-oss-credential"] = `${accessKeyId}/${dateString}/${region}/oss/aliyun_v4_request`;
+        fullQuery["x-oss-date"] = dateTimeString;
+        // fullQuery["x-oss-additional-headers"] = "host";
+
+        const canonicalUri = this.#buildCanonicalUri(bucketName, objectKey);
+        const requestUri = this.#buildRequestUri(objectKey);
+        const canonicalQuery = this.#buildCanonicalQueryString(fullQuery);
+        const canonicalHeaders = this.#buildCanonicalHeaders(headersToSign);
+        // const additionalHeaders = Object.keys(headersToSign).map(k => k.toLowerCase()).sort((k1, k2) => k1.localeCompare(k2)).join(";");
+
+        const hashedPayload = "UNSIGNED-PAYLOAD"; //
+
+        const canonicalRequest = `${method}\n${canonicalUri}\n${canonicalQuery}\n${canonicalHeaders}\n${hashedPayload}`;
+
+        const canonicalRequestData = (new TextEncoder()).encode(canonicalRequest);
+
+        const hashedRequest = encodeHex(await crypto.subtle.digest("SHA-256", canonicalRequestData));
+
+        log("\n---- begin of canonical request ----");
+        log(canonicalRequest);
+        log("---- end of canonical request ----\n");
+
+        const scope = `${dateString}/${region}/oss/aliyun_v4_request`;
+
+        const strToSign = `${SIG_VERSION}\n${dateTimeString}\n${scope}\n${hashedRequest}`;
+
+        log("\n---- begin of string to sign----");
+        log(strToSign);
+        log("---- end of string to sign ----\n")
+
+        let keyData = (new TextEncoder()).encode(`aliyun_v4${accessKeySecret}`);
+        let msgData = (new TextEncoder()).encode(dateString);
+        keyData = hmac("sha256", keyData, msgData) as Uint8Array;
+
+        msgData = (new TextEncoder()).encode(region);
+        keyData = hmac("sha256", keyData, msgData) as Uint8Array;
+
+        msgData = (new TextEncoder()).encode("oss");
+        keyData = hmac("sha256", keyData, msgData) as Uint8Array;
+
+        msgData = (new TextEncoder()).encode("aliyun_v4_request");
+        keyData = hmac("sha256", keyData, msgData) as Uint8Array;
+
+        msgData = (new TextEncoder()).encode(strToSign);
+        const signature = encodeHex(hmac("sha256", keyData, msgData));
+
+
+        const fullUrl = `${secure ? "https://" : "http://"}${domainName}${requestUri}?${canonicalQuery}&x-oss-signature=${signature}`;
+        
+        log(`> ${method} ${fullUrl}\n`);
+
+        return fullUrl;
+    }
+
+    protected async sendRequest(requestConfig: RequestConfig): Promise<Response> {
+        const { region, endpoint, accessKeyId, accessKeySecret, secure } = this.#clientConfig;
+        const { method, bucketName, objectKey, headers, query, body } = requestConfig;
 
         const domainName = `${bucketName ? bucketName : ""}${bucketName ? "." : ""}${endpoint}`;
 
@@ -190,8 +265,12 @@ export class Operation {
             requestInit.body = body;
         }
 
+        return fetch(fullUrl, requestInit);
+    }
+
+    protected async doRequest(requestConfig: RequestConfig): Promise<ResponseResult> {
         try {
-            const response = await fetch(fullUrl, requestInit);
+            const response = await this.sendRequest(requestConfig);
             log(`< resopnse status code: ${response.status}`);
             const status = response.status;
             if (status >= 500) {
