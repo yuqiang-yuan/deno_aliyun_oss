@@ -5,17 +5,16 @@ import { extname } from "std/path/mod.ts";
 
 import { parse as parseXml } from "xml/mod.ts";
 
-import { ClientConfig, CommonOptions, RequestConfig, ClientError, HttpMethod } from "./common.ts";
+import { ClientConfig, RequestConfig, ClientError, HttpMethod } from "./common.ts";
 import { Operation } from "./operation.ts";
 import { isBlank, log, camelToKebab } from "./helper.ts";
-
 
 /**
  * Put object request. 
  * See [Official Document](https://help.aliyun.com/zh/oss/developer-reference/putobject?spm=a2c4g.11186623.0.0.730f4478jfQuVL) 
  * for more details.
  */
-export interface PutObjectOptions extends CommonOptions {
+export interface PutObjectOptions {
     /**
      * 指定该 Object 被下载时网页的缓存行为。选填项。取值如下：
      *
@@ -129,7 +128,60 @@ export interface PutObjectOptions extends CommonOptions {
      *
      * 元数据支持短划线（`-`）、数字、英文字母（`a~z`）。英文字符的大写字母会被转成小写字母，不支持下划线（`_`）在内的其他字符。
      */
-    meta?: Record<string, string | number | boolean>
+    meta?: Record<string, string | number | boolean>;
+
+    /**
+     * 回调配置
+     */
+    callback?: CallbackOptions;
+
+    /**
+     * 回调中需要使用的自定义参数。自定义参数的 key 以 `x:` 开始。
+     * 例如：`x:var1` = `value1`
+     */
+    callbackVariables?: Record<string, string>;
+}
+
+/**
+ * PutObject, PostObject 和 CompleteMultipartUpload 请求中，
+ * 可以设定自定义的 callback 
+ *
+ * 详细的参数请参考 [官方文档](https://help.aliyun.com/zh/oss/developer-reference/callback)
+ */
+export interface CallbackOptions {
+    /**
+     * 文件上传成功后，OSS 向此 URL 发送回调请求。
+     * - 请求方法为 `POST` ，Body 为 `body` 指定的内容。
+     *   正常情况下，该URL需要响应 `HTTP/1.1 200 OK`，响应 Body 必须为 JSON 格式，响应头 `Content-Length` 必须为合法的值，且大小不超过 3 MB。
+     * - 支持同时配置最多 5 个 URL，多个 URL 间以分号（`;`）分隔。OSS 会依次发送请求，直到第一个回调请求成功返回。
+     * - 支持 HTTPS 地址。
+     * - 为了保证正确处理中文等情况，`url` 需做 URL 编码处理，
+     * 例如 `http://example.com/中文.php?key=value&中文名称=中文值` 
+     * 需要编码为 `http://example.com/%E4%B8%AD%E6%96%87.php?key=value&%E4%B8%AD%E6%96%87%E5%90%8D%E7%A7%B0=%E4%B8%AD%E6%96%87%E5%80%BC`。
+     */
+    url: string;
+
+    /**
+     * 发起回调请求时 `Host` 头的值，格式为域名或 IP 地址。
+     * 如果不配置 `host`，那么 OSS 会通过解析 `url` 来得到 Host
+     */
+    host?: string;
+
+    /**
+     * 发起回调时请求 Body 的值，例如 `key=${object}&etag=${etag}&my_var=${x:my_var}`
+     */
+    body: string;
+
+    /**
+     * 客户端发起回调请求时，OSS 是否向通过 callbackUrl 指定的回源地址发送服务器名称指示 SNI（Server Name Indication）。
+     * 是否发送 SNI 取决于服务器的配置和需求。对于使用同一个IP地址来托管多个 TLS/SSL 证书的服务器的情况，建议选择发送SNI。
+     */
+    sni?: boolean;
+
+    /**
+     * 发起回调请求的 `Content-Type`
+     */
+    bodyType?: "application/x-www-form-urlencoded" | "application/json";
 }
 
 /**
@@ -250,6 +302,44 @@ export interface SignatureOptions {
     additionalParameters?: Record<string, string>;
 }
 
+export interface GetObjectMetaOptions {
+    versionId?: string;
+}
+
+export interface GetObjectMetaResult {
+    /**
+     * Object 的文件大小，单位为字节。
+     */
+    contentLength: number;
+
+    /**
+     * Object 生成时会创建 ETag（entity tag），ETag 用于标识一个 Object 的内容。
+     * 
+     * 对于通过 PutObject 请求创建的 Object，ETag 值是其内容的 MD5 值；
+     * 对于其他方式创建的 Object，ETag 值是基于一定计算规则生成的唯一值，但不是其内容的 MD5 值。
+     * ETag 值可以用于检查 Object 内容是否发生变化。不建议用户使用 ETag 作为 Object 内容的 MD5 校验来验证数据完整性。
+     */
+    etag: string;
+
+    /**
+     * Object 的最后一次访问时间。
+     * 开启访问跟踪时，该字段的值会随着文件被访问的时间持续更新。
+     * 如果开启后关闭了访问跟踪，该字段的值保留为上一次最后更新的值。
+     */
+    lastAccessTime?: Date;
+
+    /**
+     * Object 最后一次修改时间
+     */
+    lastModified?: Date;
+
+    /**
+     * Object的版本ID。只有查看Object指定版本的元数据信息时才显示该字段
+     */
+    versionId?: string;
+}
+
+
 /**
  * Object operations
  */
@@ -293,8 +383,9 @@ export class ObjectOperation extends Operation {
      * 将 Stream 上传到 OSS。
      *
      * 如果要使用此方法上传 Object， 必需设置 `options` 中的 `contentType`, `contentLength` 和 `contentMd5` (base64 字符串格式)。
+     * 
      */
-    async putStream(bucketName: string, objectKey: string, stream: ReadableStream, options?: PutObjectOptions): Promise<PutObjectResult> {
+    async putStream(bucketName: string, objectKey: string, stream: ReadableStream, options?: PutObjectOptions): Promise<PutObjectResult | string> {
         if (isBlank(bucketName) || isBlank(objectKey)) {
             throw new ClientError("invalid bucket name or folder path to put object");
         }
@@ -365,6 +456,39 @@ export class ObjectOperation extends Operation {
             headers["x-oss-tagging"] = Object.entries(options!.tagging).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
         }
 
+        const callback = options?.callback;
+        const callbackVariables = options?.callbackVariables;
+
+        // const query: Record<string, string> = {};
+        if (callback) {
+            const { url, host, body, bodyType, sni} = callback;
+            const callbackObj: Record<string, string> = {
+                callbackUrl: url,
+                callbackBody: body,
+            };
+
+            if (host) {
+                callbackObj.callbackHost = host;
+            }
+
+            if (bodyType) {
+                callbackObj.callbackBodyType = bodyType;
+            }
+
+            if (sni !== undefined) {
+                callbackObj.callbackSNI = `${sni}`;
+            }
+            
+            const s = JSON.stringify(callbackObj);
+
+            headers["x-oss-callback"] = encodeBase64((new TextEncoder()).encode(s));
+        }
+
+        if (callbackVariables) {
+            const s = JSON.stringify(callbackVariables);
+            headers["x-oss-callback-var"] = encodeBase64((new TextEncoder()).encode(s));
+        }
+
         const requestConfig: RequestConfig = {
             method: "PUT",
             bucketName,
@@ -373,7 +497,12 @@ export class ObjectOperation extends Operation {
             body: stream,
         };
 
-        const { headers: responseHeaders } = await super.doRequest(requestConfig);
+        const { headers: responseHeaders, content } = await super.doRequest(requestConfig);
+
+        if (callback) {
+            return content!;
+        }
+
         return {
             contentMd5: responseHeaders["content-md5"],
             crc64: responseHeaders["x-oss-hash-crc64ecma"],
@@ -385,8 +514,10 @@ export class ObjectOperation extends Operation {
      * 上传 Object。
      *
      * `objectKey` 无需包含签到的斜线（`/`）。例如：`foo/bar/example.png`。
+     *
+     * 如果上传文件的时候指定了 `callback` 选项，那么返回值是 OSS 调用 callback 之后返回的内容字符串
      */
-    async putObject(bucketName: string, objectKey: string, filePath: string, options?: PutObjectOptions): Promise<PutObjectResult> {
+    async putObject(bucketName: string, objectKey: string, filePath: string, options?: PutObjectOptions): Promise<PutObjectResult | string> {
         if (isBlank(filePath)) {
             throw new ClientError("filePath must NOT be emtpy");
         }
@@ -461,6 +592,48 @@ export class ObjectOperation extends Operation {
 
         const { headers: responseHeaders } = await super.doRequest(requestConfig);
         return responseHeaders;
+    }
+
+    async getObjectMeta(bucketName: string, objectKey: string, options?: GetObjectMetaOptions): Promise<GetObjectMetaResult> {
+        if (isBlank(bucketName) || isBlank(objectKey)) {
+            throw new ClientError("bucketName and objectKey are required, can not be empty");
+        }
+
+        const query: Record<string, string | null> = {
+            "objectMeta": null,
+        }
+
+        if (options?.versionId) {
+            query["versionId"] = options!.versionId;
+        }
+
+        const requestConfig: RequestConfig = {
+            method: "HEAD",
+            bucketName,
+            objectKey,
+            query
+        };
+
+        const { headers: responseHeaders } = await super.doRequest(requestConfig);
+        
+        const result: GetObjectMetaResult = {
+            contentLength: parseInt(`${responseHeaders["content-length"]}`),
+            etag: responseHeaders["etag"],
+        };
+
+        if (responseHeaders["x-oss-last-access-time"]) {
+            result.lastAccessTime = new Date(responseHeaders["x-oss-last-access-time"]);
+        }
+
+        if (responseHeaders["last-modified"]) {
+            result.lastModified = new Date(responseHeaders["last-modified"]);
+        }
+
+        if (responseHeaders["x-oss-version-id"]) {
+            result.versionId = responseHeaders["x-oss-version-id"];
+        }
+
+        return result;
     }
 
     /**
@@ -579,6 +752,8 @@ export class ObjectOperation extends Operation {
 
         return super.generatePresignedUrl(requestConfig);
     }
+
+
 }
 
 

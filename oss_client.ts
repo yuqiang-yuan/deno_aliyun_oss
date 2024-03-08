@@ -7,7 +7,7 @@
 import { ClientConfig, HttpMethod } from "./common.ts";
 
 import { Bucket, BucketOperation, ListBucketsOptions, BucketInfo, ListObjectsQuery, ListObjectsResult } from "./bucket.ts";
-import { ObjectOperation, PutObjectOptions, PutObjectResult, HeadObjectOptions, GetObjectOptions, DeleteObjectOptions, SignatureOptions } from "./object.ts";
+import { ObjectOperation, PutObjectOptions, PutObjectResult, HeadObjectOptions, GetObjectOptions, DeleteObjectOptions, SignatureOptions, GetObjectMetaOptions, GetObjectMetaResult } from "./object.ts";
 /**
  * Options for oss client
  */
@@ -118,14 +118,32 @@ export class OssClient {
     //     return this.#objectOperations.putFile(bucketName, objectKey, file, options);
     // }
 
-    putObject(bucketName: string, objectKey: string, filePath: string, options?: PutObjectOptions): Promise<PutObjectResult> {
+    /**
+     * 上传本地文件到 Object
+     *
+     * 如果启用了 `callback`，那么返回值是 OSS 调用 `callback` 之后的返回数据，应该是一个有效的 JSON 格式字符串。
+     */
+    putObject(bucketName: string, objectKey: string, filePath: string, options?: PutObjectOptions): Promise<PutObjectResult | string> {
         return this.#objectOperations.putObject(bucketName, objectKey, filePath, options);
     }
 
+    /**
+     * 获取 Object 元数据。推荐使用 `getObjectMeta`
+     */
     headObject(bucketName: string, objectKey: string, options?: HeadObjectOptions): Promise<Record<string, string>> {
         return this.#objectOperations.headObject(bucketName, objectKey, options);
     }
 
+    /**
+     * 获取 Object 元数据
+     */
+    getObjectMeta(bucketName: string, objectKey: string, options?: GetObjectMetaOptions): Promise<GetObjectMetaResult> {
+        return this.#objectOperations.getObjectMeta(bucketName, objectKey, options);
+    }
+
+    /**
+     * 下载 Object 到本地文件
+     */
     getObject(bucketName: string, objectKey: string, localFilepath: string, options?: GetObjectOptions): Promise<void> {
         return this.#objectOperations.getObject(bucketName, objectKey, localFilepath, options);
     }
