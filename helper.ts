@@ -67,3 +67,33 @@ export function isBlank(s: string | undefined | null): boolean {
 
     return s.trim().length === 0;
 }
+
+/**
+ * 对字符串中特殊的字符进行编码，以保证放到 XML 中是一个合法的数据。
+ *
+ * 参考：https://www.liquid-technologies.com/Reference/Glossary/XML_EscapingData.html
+ */
+export function escapeXmlSpecialChars(s: string): string {
+    return s.replace(/[<>"'&]/g, (p1) => {
+        if (p1 === "<") {
+            return "&lt;"
+        }
+
+        if (p1 === ">") {
+            return "&gt;";
+        }
+
+        if (p1 === "\"") {
+            return "&quot;";
+        }
+
+        if (p1 === "'") {
+            return "&apos;"
+        }
+
+        if (p1 === "&") {
+            return "&amp;"
+        }
+        return p1;
+    });
+}

@@ -6,8 +6,27 @@
 
 import { ClientConfig, HttpMethod } from "./common.ts";
 
-import { Bucket, BucketOperation, ListBucketsOptions, BucketInfo, ListObjectsQuery, ListObjectsResult } from "./bucket.ts";
-import { ObjectOperation, PutObjectOptions, PutObjectResult, HeadObjectOptions, GetObjectOptions, DeleteObjectOptions, SignatureOptions, GetObjectMetaOptions, GetObjectMetaResult } from "./object.ts";
+import { 
+    Bucket, 
+    BucketOperation, 
+    ListBucketsOptions, 
+    BucketInfo, 
+    ListObjectsQuery, 
+    ListObjectsResult 
+} from "./bucket.ts";
+
+import { 
+    ObjectOperation, 
+    PutObjectOptions, 
+    PutObjectResult, 
+    HeadObjectOptions, 
+    GetObjectOptions, 
+    DeleteObjectOptions, 
+    DeleteMultipleObjectsResult,
+    SignatureOptions, 
+    GetObjectMetaOptions, 
+    GetObjectMetaResult
+} from "./object.ts";
 /**
  * Options for oss client
  */
@@ -148,10 +167,23 @@ export class OssClient {
         return this.#objectOperations.getObject(bucketName, objectKey, localFilepath, options);
     }
 
+    /**
+     * 删除单个 Object
+     */
     deleteObject(bucketName: string, objectKey: string, options?: DeleteObjectOptions): Promise<void> {
         return this.#objectOperations.deleteObject(bucketName, objectKey, options);
     }
 
+    /**
+     * 批量删除 Object
+     */
+    deleteMultipleObjects(bucketName: string, items: {key: string; versionId?: string}[], quiet?: boolean): Promise<void> {
+        return this.#objectOperations.deleteMultipleObjects(bucketName, items, quiet);
+    }
+
+    /**
+     * 生成预签名的 URL
+     */
     singatureUrl(method: HttpMethod, bucketName: string, objectKey: string, options: SignatureOptions): Promise<string> {
         return this.#objectOperations.signatureUrl(method, bucketName, objectKey, options);
     }

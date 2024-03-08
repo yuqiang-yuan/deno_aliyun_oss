@@ -7,7 +7,7 @@ import { parse as parseXml } from "xml/mod.ts";
 
 import { ClientConfig, RequestConfig, ClientError, HttpMethod } from "./common.ts";
 import { Operation } from "./operation.ts";
-import { isBlank, log, camelToKebab } from "./helper.ts";
+import { isBlank, log, camelToKebab, escapeXmlSpecialChars } from "./helper.ts";
 
 /**
  * Put object request. 
@@ -273,6 +273,10 @@ export interface DeleteObjectOptions {
     versionId?: string;
 }
 
+export interface DeleteMultipleObjectsResult {
+
+}
+
 export interface SignatureOptions {
     /**
      * 有效期多少秒
@@ -338,7 +342,6 @@ export interface GetObjectMetaResult {
      */
     versionId?: string;
 }
-
 
 /**
  * Object operations
@@ -478,7 +481,7 @@ export class ObjectOperation extends Operation {
             if (sni !== undefined) {
                 callbackObj.callbackSNI = `${sni}`;
             }
-            
+
             const s = JSON.stringify(callbackObj);
 
             headers["x-oss-callback"] = encodeBase64((new TextEncoder()).encode(s));
@@ -705,6 +708,63 @@ export class ObjectOperation extends Operation {
             bucketName,
             objectKey,
             query
+        };
+
+        await super.doRequest(requestConfig);
+    }
+
+    async deleteMultipleObjects(bucketName: string, items: {key: string; versionId?: string}[], quiet?: boolean): Promise<void> {
+        if (isBlank(bucketName) || items.length === 0) {
+            throw new ClientError("bucketName and items are required");
+        }
+
+        // 自己拼 XML 吧，属性名都是关键字，这可咋整啊
+        const lines = [
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+            "<Delete>"
+        ];
+
+        if (quiet !== undefined) {
+            lines.push(`<Quiet>${quiet}</Quiet>`);
+        }
+
+        items.forEach(item => {
+            lines.push("<Object>");
+            const { key, versionId } = item;
+            lines.push(`<Key>${escapeXmlSpecialChars(key)}</Key>`);
+            if (versionId !== undefined) {
+                lines.push(`<VersionId>${escapeXmlSpecialChars(versionId)}</VersionId>`);
+            }
+            lines.push("</Object>")
+        });
+
+        lines.push("</Delete>");
+
+        const xmlContent = lines.join("\n");
+
+        const data = (new TextEncoder()).encode(xmlContent);
+        const headers: Record<string, string> = {
+            "content-type": "application/xml",
+            "content-length": `${data.length}`,
+            "content-md5": encodeBase64(await crypto.subtle.digest("MD5", data))
+        };
+
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(data);
+                controller.close();
+            },
+            type: "bytes"
+        });
+
+        const requestConfig: RequestConfig = {
+            method: "POST",
+            bucketName,
+            headers,
+            query: {
+                "delete": undefined
+            },
+            body: stream
         };
 
         await super.doRequest(requestConfig);
