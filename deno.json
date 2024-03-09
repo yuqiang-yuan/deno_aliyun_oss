@@ -6,7 +6,7 @@
         "./oss_client.ts": "./oss_client.ts"
     },
     "imports": {
-        "std/": "https://deno.land/std@0.218.2/",
+        "std/": "https://deno.land/std@0.219.0/",
         "hmac/": "https://deno.land/x/hmac@v2.0.1/",
         "xml/": "https://deno.land/x/xml@2.1.3/"
     },
