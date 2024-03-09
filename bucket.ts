@@ -6,7 +6,7 @@ import { camelToKebab, isBlank } from "./helper.ts";
 
 /**
  * List buckets query parameters.
- * See [Official Documents](https://help.aliyun.com/zh/oss/developer-reference/listbuckets?spm=a2c4g.11186623.0.0.1b0ab930SHOdG9) for more details.
+ * See [Official Documents](https://help.aliyun.com/zh/oss/developer-reference/listbuckets) for more details.
  */
 export interface ListBucketsOptions {
     /**

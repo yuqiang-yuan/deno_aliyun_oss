@@ -7,7 +7,7 @@ import { parse as parseXml } from "xml/mod.ts";
 
 import { ClientConfig, RequestConfig, ClientError, HttpMethod } from "./common.ts";
 import { Operation } from "./operation.ts";
-import { isBlank, log, camelToKebab, escapeXmlSpecialChars } from "./helper.ts";
+import { isBlank, log, camelToKebab, escapeXmlSpecialChars, closeResource } from "./helper.ts";
 
 /**
  * Put object request. 
@@ -277,6 +277,13 @@ export interface DeleteMultipleObjectsResult {
 
 }
 
+export interface MultipartUploadOptions extends PutObjectOptions {
+    /**
+     * 每片大小。如果不设置，则系统自动判断片大小
+     */
+    partSize?: number;
+}
+
 export interface SignatureOptions {
     /**
      * 有效期多少秒
@@ -382,22 +389,7 @@ export class ObjectOperation extends Operation {
         await super.doRequest(requestConfig);
     }
 
-    /**
-     * 将 Stream 上传到 OSS。
-     *
-     * 如果要使用此方法上传 Object， 必需设置 `options` 中的 `contentType`, `contentLength` 和 `contentMd5` (base64 字符串格式)。
-     * 
-     */
-    async putStream(bucketName: string, objectKey: string, stream: ReadableStream, options?: PutObjectOptions): Promise<PutObjectResult | string> {
-        if (isBlank(bucketName) || isBlank(objectKey)) {
-            throw new ClientError("invalid bucket name or folder path to put object");
-        }
-        
-        let sanitizedObjectKey = objectKey;
-        if (sanitizedObjectKey.startsWith("/")) {
-            sanitizedObjectKey = sanitizedObjectKey.substring(1);
-        }
-        
+    #buildPutObjectHeaders(options?: PutObjectOptions): Record<string, string> {
         const headers: Record<string, string> = {};
         if (options?.contentType) {
             headers["content-type"] = options!.contentType;
@@ -492,6 +484,27 @@ export class ObjectOperation extends Operation {
             headers["x-oss-callback-var"] = encodeBase64((new TextEncoder()).encode(s));
         }
 
+        return headers;
+    }
+
+    /**
+     * 将 Stream 上传到 OSS。
+     *
+     * 如果要使用此方法上传 Object， 必需设置 `options` 中的 `contentType`, `contentLength` 和 `contentMd5` (base64 字符串格式)。
+     * 
+     */
+    async putStream(bucketName: string, objectKey: string, stream: ReadableStream, options?: PutObjectOptions): Promise<PutObjectResult | string> {
+        if (isBlank(bucketName) || isBlank(objectKey)) {
+            throw new ClientError("invalid bucket name or folder path to put object");
+        }
+        
+        let sanitizedObjectKey = objectKey;
+        if (sanitizedObjectKey.startsWith("/")) {
+            sanitizedObjectKey = sanitizedObjectKey.substring(1);
+        }
+
+        const headers = this.#buildPutObjectHeaders(options);
+        
         const requestConfig: RequestConfig = {
             method: "PUT",
             bucketName,
@@ -502,7 +515,7 @@ export class ObjectOperation extends Operation {
 
         const { headers: responseHeaders, content } = await super.doRequest(requestConfig);
 
-        if (callback) {
+        if (options?.callback) {
             return content!;
         }
 
@@ -813,6 +826,288 @@ export class ObjectOperation extends Operation {
         return super.generatePresignedUrl(requestConfig);
     }
 
+    /**
+     * 初始化分片上传
+     * @return {Promise<string>}             The upload id
+     */
+    async #initMultipartUpload(bucketName: string, objectKey: string, options?: PutObjectOptions): Promise<string> {
+        const opt = Object.assign({}, options);
+
+        delete opt.callback;
+        delete opt.callbackVariables;
+
+        const headers = this.#buildPutObjectHeaders(opt);
+
+        const requestConfig: RequestConfig = {
+            method: "POST",
+            bucketName,
+            objectKey,
+            headers,
+            query: {
+                "uploads": undefined
+            }
+        };
+        const { content } = await super.doRequest(requestConfig);
+        if (! content) {
+            throw new ClientError("empty resopnse content while initialize multipart upload");
+        }
+
+        const doc = parseXml(content);
+
+        //@ts-ignore xml parser
+        return doc["InitiateMultipartUploadResult"]["UploadId"];
+    }
+
+    /**
+     * 计算分片的配置
+     * @param {number} fileSize     文件大小，字节为单位
+     * @param {number} userPartSize 用户指定的每片的大小
+     */
+    #buildPartConfig(fileSize: number, userPartSize?: number): { 
+        partCount: number, 
+        partSize: number, 
+        lastPartSize: number 
+    } {
+        const MAX_PART_COUNT = 10000;
+        const MAX_PART_SIZE = 1024 ** 3 * 5; // max 5GB/part
+        let partSize = userPartSize ? userPartSize : 1024 * 1024 * 100;
+
+        if (partSize > fileSize) {
+            return {
+                partCount: 1,
+                partSize: fileSize,
+                lastPartSize: fileSize,
+            };
+        }
+
+        let partCount = Math.floor((fileSize - 1) / partSize) + 1;
+
+        if (partCount > 10000) {
+            partSize = Math.ceil(partSize * (partCount / 10000));
+            partCount = Math.floor((fileSize - 1) / partSize) + 1;
+        }
+
+        if (partCount > MAX_PART_COUNT || partSize > MAX_PART_SIZE) {
+            throw new ClientError("file is too large to upload to aliyun oss");
+        }
+
+        const lastPartSize = fileSize % partCount === 0 ? partSize : fileSize - (partSize * (partCount - 1));
+
+        return {
+            partCount,
+            partSize,
+            lastPartSize
+        };
+    }
+
+    /**
+     * 上传文件片
+     * @return {Promise<string>}            ETag 响应头
+     */
+    async #uploadFilePart(bucketName: string, objectKey: string, filePath: string, uploadId: string, partId: number, startByte: number, endByte: number): Promise<string> {
+        let file: Deno.FsFile | undefined;
+        let payloadStream: ReadableStream | undefined;
+
+        const BUF_LEN = 1024 * 64; // 64kB buffer
+        
+
+        const totalBytes = endByte - startByte;
+        let totalRead = 0;
+
+        try {
+            file = await Deno.open(filePath);
+            console.log(file);
+            file.seek(startByte, Deno.SeekMode.Start);
+            log(`${filePath} seek to ${startByte}`);
+            payloadStream = new ReadableStream({
+                start(_controller) {
+
+                },
+                async pull(controller) {
+                    // log(`total read: ${totalRead} from total bytes: ${totalBytes}`);
+                    if (totalRead >= totalBytes) {
+                        controller.close();
+                        return;
+                    }
+
+                    // according to the document: It is possible for a read to successfully return with `0` bytes. This does not indicate EOF.
+                    // 所以，这里，如果真的读取到 0 个字节，应该如何处理？
+                    // 还有一个问题，buf 必需得是当前作用范围的变量。如果 buf 是在更外层定义的，会导致 "Cannot perform Construct on a detached ArrayBuffer" 错误
+                    // 最一开始，buf 是定义在外面的，导致第二次 pull 的时候返回了 0 
+                    const buf = new Uint8Array(BUF_LEN);
+                    const n = await file!.read(buf);
+                    if (n === null) {
+                        log(`EOF of file read stream`);
+                        controller.close();
+                        return;
+                    }
+
+                    totalRead += n!;
+                    if (totalRead <= totalBytes) {
+                        // log(`enqueue bytes: ${n}`);
+                        controller.enqueue(buf.subarray(0, n!));
+                    } else {
+                        // 为什么会出现读取的比期望的更多？因为从文件中间开始读取，他有可能读取到了下一个分片的字节了，所以得把这部分字节砍掉
+                        // log(`enqueue bytes: ${totalBytes - totalRead - n!}`);
+                        controller.enqueue(buf.subarray(0, totalBytes - (totalRead - n!)));
+                    }
+                },
+                type: "bytes"
+            });
+
+            const requestConfig: RequestConfig = {
+                method: "PUT",
+                bucketName,
+                objectKey,
+                headers: {
+                    "content-length": `${totalBytes}`,
+                },
+                query: {
+                    partNumber: `${partId}`,
+                    uploadId,
+                },
+                body: payloadStream
+            };
+
+            const { headers } = await super.doRequest(requestConfig);
+            return headers["etag"];
+        } catch(e) {
+            throw e;
+        } finally {
+            closeResource(file);
+        }
+    }
+
+    async #completeMultipartUpload(bucketName: string, objectKey: string, uploadId: string, partResults: {partNumber: number, etag: string}[], options?: PutObjectOptions): Promise<void | string> {
+        const opt: PutObjectOptions = {};
+        if (options?.callback) {
+            opt.callback = options!.callback;
+        }
+        if (options?.callbackVariables) {
+            opt.callbackVariables = options!.callbackVariables;
+        }
+
+        const headers = this.#buildPutObjectHeaders(opt);
+
+        const payloadLines: string[] = ["<CompleteMultipartUpload>"];
+        partResults.forEach(r => {
+            payloadLines.push("<Part>");
+            payloadLines.push(`<PartNumber>${r.partNumber}</PartNumber>`);
+            payloadLines.push(`<ETag>${escapeXmlSpecialChars(r.etag)}</ETag>`);
+            payloadLines.push("</Part>");
+        });
+
+        payloadLines.push("</CompleteMultipartUpload>");
+
+        const payloadContent = payloadLines.join("\n");
+        log(`complete multipart upload ${uploadId} payload: `);
+        log(payloadContent);
+
+        const payloadData = (new TextEncoder()).encode(payloadContent);
+
+        const md5 = encodeBase64(await crypto.subtle.digest("MD5", payloadData));
+        headers["content-md5"] = md5;
+
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(payloadData);
+                controller.close();
+            },
+            type: "bytes"
+        });
+
+        const requestConfig: RequestConfig = {
+            method: "POST",
+            bucketName,
+            objectKey,
+            headers,
+            query: {
+                uploadId,
+            },
+            body: stream
+        };
+
+        const result = await super.doRequest(requestConfig);
+        if (options?.callback) {
+            return result.content;
+        }
+    }
+
+    /**
+     * 分片上传大文件。尚未支持并发上传。
+     * 如果指定了 `callback`，那么返回的是上传完毕之后的调用回调的响应内容。
+     */
+    async multipartUpload(bucketName: string, objectKey: string, filePath: string, options?: MultipartUploadOptions): Promise<string | void> {
+        if (isBlank(bucketName) || isBlank(objectKey)) {
+            throw new ClientError("bucket name and object key are required, must NOT be empty");
+        }
+
+        let sanitizedObjectKey = objectKey;
+        if (sanitizedObjectKey.startsWith("/")) {
+            sanitizedObjectKey = sanitizedObjectKey.substring(1);
+        }
+
+        let inputFile: Deno.FsFile | undefined;
+
+        try {
+            inputFile = await Deno.open(filePath);
+            const stat = await inputFile.stat();
+            if (!stat.isFile) {
+                throw new ClientError(`file ${filePath} is not a regular file`);
+            }
+
+            if (stat.size === 0) {
+                throw new ClientError(`file ${filePath} is 0-length, can not upload to OSS`);
+            }
+
+            // 小于 1MB 的文件，就直接上传了
+            if (stat.size <= 1024 * 1024) {
+                log(`file ${filePath} is less than 1MB, upload it directly`);
+                const result = await this.putObject(bucketName, sanitizedObjectKey, filePath, options);
+                if (typeof result === "string") {
+                    return result;
+                }
+                return;
+            }
+
+            // release resource asap
+            closeResource(inputFile);
+            inputFile = undefined;
+
+            const uploadId = await this.#initMultipartUpload(bucketName, sanitizedObjectKey, options);
+            log(`multipart upload initialize: ${uploadId}`);
+
+            const { partCount, partSize, lastPartSize } = this.#buildPartConfig(stat.size, options?.partSize);
+            log(`multipart upload ${uploadId} will be split into ${partCount} parts, and ${partSize} bytes per part (last part size: ${lastPartSize})`);
+
+            const partResults = [];
+            for (let i = 0; i < partCount; i++) {
+                const startByte = i * partSize;
+                const endByte = startByte + (i === partCount - 1 ? lastPartSize : partSize);
+                const etag = await this.#uploadFilePart(bucketName, objectKey, filePath, uploadId, i + 1, startByte, endByte);
+                log(`multipart upload ${uploadId} part ${i + 1} uploaded with etag: ${etag}`);
+                partResults.push({
+                    partNumber: i + 1,
+                    etag: etag,
+                });
+            }
+
+            log(`completing multipart upload ${uploadId}`);
+            return await this.#completeMultipartUpload(bucketName, objectKey, uploadId, partResults, options);
+        } catch (e) {
+            if (e instanceof Deno.errors.NotFound) {
+                throw new ClientError(`can not find file ${filePath}`);
+            }
+
+            if (e instanceof Deno.errors.PermissionDenied) {
+                throw new ClientError(`can not read file ${filePath}`);
+            }
+
+            throw e;
+        } finally {
+            closeResource(inputFile);
+        }
+    }
 
 }
 

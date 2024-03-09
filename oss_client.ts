@@ -25,7 +25,8 @@ import {
     DeleteMultipleObjectsResult,
     SignatureOptions, 
     GetObjectMetaOptions, 
-    GetObjectMetaResult
+    GetObjectMetaResult,
+    MultipartUploadOptions
 } from "./object.ts";
 /**
  * Options for oss client
@@ -140,10 +141,19 @@ export class OssClient {
     /**
      * 上传本地文件到 Object
      *
-     * 如果启用了 `callback`，那么返回值是 OSS 调用 `callback` 之后的返回数据，应该是一个有效的 JSON 格式字符串。
+     * 如果启用了 `callback`，那么返回值是 OSS 调用 `callback` 之后的返回数据
      */
     putObject(bucketName: string, objectKey: string, filePath: string, options?: PutObjectOptions): Promise<PutObjectResult | string> {
         return this.#objectOperations.putObject(bucketName, objectKey, filePath, options);
+    }
+
+    /**
+     * 分片上传文件。目前是串行上传的，尚未支持并发。
+     *
+     * 如果上传参数中设置了回调信息，那么返回的是 OSS 调用回调之后的响应内容。
+     */
+    multipartUpload(bucketName: string, objectKey: string, filePath: string, options?: MultipartUploadOptions): Promise<string | void> {
+        return this.#objectOperations.multipartUpload(bucketName, objectKey, filePath, options);
     }
 
     /**

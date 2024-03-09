@@ -1,4 +1,5 @@
 import { load } from "std/dotenv/mod.ts";
+import { Closer } from "std/io/types.ts";
 
 const DEBUG = await (async () => {
     if (!Deno.env.get("DEBUG")) {
@@ -96,4 +97,21 @@ export function escapeXmlSpecialChars(s: string): string {
         }
         return p1;
     });
+}
+
+/**
+ * Some resource in Deno will be closed automatically after use.
+ * So when we are going to close a "closed" resource, error will be thrown
+ * Here is a helper function to close resource an silent the error
+ */
+export function closeResource(res: Closer | undefined) {
+    if (! res) {
+        return;
+    }
+    
+    try {
+        res.close();
+    } catch (_e) {
+        // silent the error
+    }
 }
