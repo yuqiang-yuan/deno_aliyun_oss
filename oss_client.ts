@@ -22,12 +22,13 @@ import {
     HeadObjectOptions, 
     GetObjectOptions, 
     DeleteObjectOptions, 
-    DeleteMultipleObjectsResult,
     SignatureOptions, 
     GetObjectMetaOptions, 
     GetObjectMetaResult,
     MultipartUploadOptions
 } from "./object.ts";
+
+
 /**
  * Options for oss client
  */
