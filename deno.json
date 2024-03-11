@@ -1,5 +1,5 @@
 {
-    "name": "@yuanyq/aliyun_oss",
+    "name": "@yuanyq/aliyun-oss",
     "version": "v0.1.0",
     "exports": {
         ".": "./mod.ts",
